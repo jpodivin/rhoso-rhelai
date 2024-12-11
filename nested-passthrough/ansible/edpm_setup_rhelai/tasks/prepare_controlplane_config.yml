@@ -1,0 +1,59 @@
+---
+# Copyright 2024 Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+      
+- name: Install Openstack Operator index
+  ansible.builtin.shell:
+    chdir: "~/install_yamls"
+    cmd: |
+      eval $(crc oc-env) && \
+      NNCP_TIMEOUT={{ operators_timeout }} TIMEOUT={{ operators_timeout }} make openstack_wait
+
+- name: Set kustomize path # We use Cinder by default
+  ansible.builtin.set_fact:
+    kustomize_template_path: "templates/kustomization-no-cinder.yaml"
+  when: "not deploy_cinder"
+
+- name: Label cinder node
+  ansible.builtin.shell:
+    cmd: |
+      eval $(crc oc-env) && \
+      oc label node --all openstack.org/cinder-lvm=
+
+- name: Setup template dir
+  ansible.builtin.file:
+    state: directory
+    path: ~/templates
+
+- name: Copy Template to host
+  ansible.builtin.copy:
+    src: "{{ kustomize_template_path }}"
+    dest: ~/templates/kustomization.yaml
+
+- name: Create kustomization
+  ansible.builtin.shell:
+    chdir: "~/install_yamls"
+    cmd: |
+      mkdir -p ./out/ctlplane
+      sed 's/${VENDOR_ID}/$(GPU_VENDOR_ID)/g;s/${PRODUCT_ID}/$(GPU_PRODUCT_ID)/g' ~/templates/kustomization.yaml > out/ctlplane/kustomization.yaml
+    creates: ./out/ctlplane/kustomization.yaml
+
+- name: Run kustomization
+  ansible.builtin.shell:
+    chdir: "~/install_yamls"
+    cmd: "eval $(crc oc-env) && oc kustomize ./out/ctlplane > ./out/openstack-deployment.yaml && sleep 60"
+    creates: ./out/openstack-deployment.yaml
+
